@@ -235,26 +235,45 @@ def create_beam_section(doc, beam):
         print("No se encontró un tipo de vista de sección adecuado.")
         return None
 
-    t = Transaction(doc, "Crear Sección con Detalles de Viga")
-    t.Start()
+    # 6. Crear la sección (Transacción 1)
+    # Es necesario commitear la creación de la vista antes de añadir detalles complejos en Revit 2024+
+    new_section = None
+    t1 = Transaction(doc, "Crear Vista de Sección")
+    t1.Start()
     try:
         new_section = ViewSection.CreateSection(doc, section_type.Id, section_box)
         base_name = "Sección Viga - ID {}".format(beam.Id)
         new_section.Name = get_unique_view_name(doc, base_name)
         new_section.Scale = 10
-
-        # 1. Añadir cotas
-        add_beam_dimensions(doc, new_section, beam, transform)
-
-        # 2. Añadir detalle de doblado (Revit 2024+)
-        add_stirrup_bending_detail(doc, new_section, beam, transform)
-
-        t.Commit()
-        return new_section
+        new_section.DetailLevel = ViewDetailLevel.Fine
+        t1.Commit()
     except Exception as e:
-        print("Error al procesar la sección para el ID {}: {}".format(beam.Id, e))
-        t.RollBack()
+        print("Error al crear la vista de sección: {}".format(e))
+        t1.RollBack()
         return None
+
+    # 7. Añadir detalles (Transacción 2)
+    if new_section:
+        t2 = Transaction(doc, "Detallar Sección de Viga")
+        t2.Start()
+        try:
+            # Asegurar regeneración para que las armaduras sean visibles
+            doc.Regenerate()
+
+            # 1. Añadir cotas
+            add_beam_dimensions(doc, new_section, beam, transform)
+
+            # 2. Añadir detalle de doblado (Revit 2024+)
+            add_stirrup_bending_detail(doc, new_section, beam, transform)
+
+            t2.Commit()
+            return new_section
+        except Exception as e:
+            print("Error al detallar la sección: {}".format(e))
+            t2.RollBack()
+            return new_section
+
+    return None
 
 # --- Lógica de ejecución ---
 if __name__ == "__main__":
