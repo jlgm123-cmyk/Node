@@ -132,21 +132,26 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
 
         for r in rebars_in_host:
             try:
+                # 0. Filtrar por Estilo de Armadura (Stirrup/Tie)
+                if r.RebarStyle != RebarStyle.StirrupTie:
+                    continue
+
                 # 1. Verificar por Nombre de Forma (RebarShape)
                 shape_id = r.GetShapeId()
                 shape = doc.GetElement(shape_id) if shape_id != ElementId.InvalidElementId else None
-                shape_name = shape.Name if shape else "Desconocida"
+                # Se usa SYMBOL_NAME_PARAM para evitar errores de acceso directo a Name
+                shape_name = shape.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString() if shape else "Desconocida"
 
                 # 2. Verificar por Nombre de Tipo (RebarBarType)
-                type_name = doc.GetElement(r.GetTypeId()).get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString()
+                rebar_type = doc.GetElement(r.GetTypeId())
+                type_name = rebar_type.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString() if rebar_type else "Desconocido"
 
-                # 3. Verificar por parámetro de forma
+                # 3. Verificar por parámetro de forma (REBAR_SHAPE)
                 param_shape = r.get_Parameter(BuiltInParameter.REBAR_SHAPE)
                 param_shape_str = param_shape.AsValueString() if param_shape else "N/A"
 
                 print("- Rebar ID: {} | Shape: {} | Type: {} | ParamShape: {}".format(r.Id, shape_name, type_name, param_shape_str))
 
-                # Comparación flexible (insensible a mayúsculas y búsqueda de subcadena)
                 search_term = "M_T1"
                 match_found = False
 
@@ -164,7 +169,7 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
                     stirrup = r
                     break
             except Exception as ex:
-                print("  [!] Error analizando armadura {}: {}".format(r.Id, ex))
+                print("  [!] Error analizando armadura {}: {}".format(r.Id, str(ex)))
                 continue
 
         if stirrup:
