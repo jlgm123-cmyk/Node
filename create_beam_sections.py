@@ -133,24 +133,38 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
         for r in rebars_in_host:
             try:
                 # 1. Verificar por Nombre de Forma (RebarShape)
-                shape = doc.GetElement(r.GetShapeId())
-                shape_name = shape.Name if shape else ""
+                shape_id = r.GetShapeId()
+                shape = doc.GetElement(shape_id) if shape_id != ElementId.InvalidElementId else None
+                shape_name = shape.Name if shape else "Desconocida"
 
                 # 2. Verificar por Nombre de Tipo (RebarBarType)
                 type_name = doc.GetElement(r.GetTypeId()).get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString()
 
-                print("- Rebar ID: {} | Shape: {} | Type: {}".format(r.Id, shape_name, type_name))
+                # 3. Verificar por parámetro de forma
+                param_shape = r.get_Parameter(BuiltInParameter.REBAR_SHAPE)
+                param_shape_str = param_shape.AsValueString() if param_shape else "N/A"
 
-                # El usuario especifica el shape "M_T1"
-                if "M_T1" in shape_name.upper():
+                print("- Rebar ID: {} | Shape: {} | Type: {} | ParamShape: {}".format(r.Id, shape_name, type_name, param_shape_str))
+
+                # Comparación flexible (insensible a mayúsculas y búsqueda de subcadena)
+                search_term = "M_T1"
+                match_found = False
+
+                if search_term.upper() in shape_name.upper():
+                    match_found = True
+                    print("  [!] Coincidencia encontrada por Shape Name.")
+                elif search_term.upper() in type_name.upper():
+                    match_found = True
+                    print("  [!] Coincidencia encontrada por Type Name.")
+                elif search_term.upper() in param_shape_str.upper():
+                    match_found = True
+                    print("  [!] Coincidencia encontrada por Parameter Value String.")
+
+                if match_found:
                     stirrup = r
-                    print("  [!] Coincidencia de estribo encontrada por shape: {}".format(shape_name))
                     break
-                elif "M_T1" in type_name.upper():
-                    stirrup = r
-                    print("  [!] Coincidencia de estribo encontrada por tipo: {}".format(type_name))
-                    break
-            except:
+            except Exception as ex:
+                print("  [!] Error analizando armadura {}: {}".format(r.Id, ex))
                 continue
 
         if stirrup:
