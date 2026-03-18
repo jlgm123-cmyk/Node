@@ -184,9 +184,10 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
             position = XYZ(2.0, 1.0, 0.0)
 
             # Crear el detalle de doblado
-            # El error viewId suele ocurrir si el punto no es válido en el plano de la vista
-            # o si los argumentos no coinciden con la sobrecarga esperada.
-            RebarBendingDetail.Create(doc, view.Id, stirrup.Id, 0, detail_type, position, 0.0)
+            # Nota: Para la sobrecarga que usa el objeto RebarBendingDetailType, el orden suele ser:
+            # (Document, RebarBendingDetailType, ViewId, RebarId, Index, Position, Rotation)
+            # El error "viewId" sugiere que el ViewId no estaba en la posición esperada.
+            RebarBendingDetail.Create(doc, detail_type, view.Id, stirrup.Id, 0, position, 0.0)
             print("Éxito: Detalle de doblado (bending detail) creado para la armadura ID {}.".format(stirrup.Id))
         else:
             print("Aviso: No se encontraron estribos (Rebar) hospedados en la viga ID {}.".format(beam.Id))
