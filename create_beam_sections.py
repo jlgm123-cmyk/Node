@@ -122,15 +122,13 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
             print("Aviso: No se encontró ningún 'RebarBendingDetailType' en el proyecto.")
             return
 
-        # Buscar estribos (rebars) cuyo host sea la viga en todo el documento
-        all_rebars = FilteredElementCollector(doc) \
-                     .OfClass(Rebar) \
-                     .ToElements()
+        # Buscar estribos (rebars) hospedados en la viga
+        # Se utiliza RebarHostData para una búsqueda más fiable
+        host_data = RebarHostData.GetRebarHostData(beam)
+        rebars_in_host = host_data.GetRebarsInHost()
 
         stirrup = None
-        rebars_in_host = [r for r in all_rebars if r.GetHostId() == beam.Id]
-
-        print("Buscando estribos (shape: M_T1) en la viga ID {}...".format(beam.Id))
+        print("Buscando estribos (shape: M_T1) en la viga ID {} ({} armaduras encontradas)...".format(beam.Id, len(rebars_in_host)))
 
         for r in rebars_in_host:
             try:
