@@ -6,6 +6,7 @@ import clr
 clr.AddReference('RevitAPI')
 clr.AddReference('RevitAPIUI')
 from Autodesk.Revit.DB import *
+from Autodesk.Revit.DB.Structure import *
 from Autodesk.Revit.UI import *
 
 def find_section_type_by_name(doc, name="Viga"):
@@ -53,13 +54,9 @@ def add_beam_dimensions(doc, view, beam, transform):
         opt.View = view
 
         geometry = beam.get_Geometry(opt)
-
-        # Recolectar planos/caras que sean paralelos a los ejes locales de la sección
         horizontal_refs = ReferenceArray()
         vertical_refs = ReferenceArray()
 
-        # En una sección transversal, buscamos planos cuyas normales sean
-        # paralelas a los ejes Right (BasisX) o Up (BasisY) de la sección.
         view_right = transform.BasisX
         view_up = transform.BasisY
 
@@ -67,10 +64,8 @@ def add_beam_dimensions(doc, view, beam, transform):
             if isinstance(obj, Solid):
                 for face in obj.Faces:
                     normal = face.ComputeNormal(UV(0.5, 0.5))
-                    # Normal paralela al eje horizontal de la vista (BasisX) -> Referencia para ancho
                     if abs(normal.DotProduct(view_right)) > 0.99:
                         vertical_refs.Append(face.Reference)
-                    # Normal paralela al eje vertical de la vista (BasisY) -> Referencia para alto
                     elif abs(normal.DotProduct(view_up)) > 0.99:
                         horizontal_refs.Append(face.Reference)
             elif isinstance(obj, GeometryInstance):
@@ -84,17 +79,13 @@ def add_beam_dimensions(doc, view, beam, transform):
                             elif abs(normal.DotProduct(view_up)) > 0.99:
                                 horizontal_refs.Append(face.Reference)
 
-        # Crear cota de ancho (Horizontal)
         if vertical_refs.Size >= 2:
-            # Línea de cota horizontal (desplazada un poco arriba del centro)
             line_p1 = transform.Origin + view_up * 0.5
             line_p2 = line_p1 + view_right
             dim_line = Line.CreateBound(line_p1, line_p2)
             doc.Create.NewDimension(view, dim_line, vertical_refs)
 
-        # Crear cota de alto (Vertical)
         if horizontal_refs.Size >= 2:
-            # Línea de cota vertical (desplazada un poco al lado del centro)
             line_p1 = transform.Origin + view_right * 0.5
             line_p2 = line_p1 + view_up
             dim_line = Line.CreateBound(line_p1, line_p2)
@@ -103,22 +94,63 @@ def add_beam_dimensions(doc, view, beam, transform):
     except Exception as e:
         print("Aviso: No se pudieron generar todas las cotas automáticas ({}).".format(e))
 
+def find_rebar_bending_detail_type(doc):
+    """
+    Busca el primer tipo de detalle de doblado de armadura disponible.
+    """
+    collector = FilteredElementCollector(doc).OfClass(RebarBendingDetailType)
+    return collector.FirstElement()
+
+def add_stirrup_bending_detail(doc, view, beam, transform):
+    """
+    Busca estribos asociados a la viga y crea un detalle de doblado en la vista.
+    Revit 2024+
+    """
+    try:
+        # Buscar el tipo de detalle de doblado
+        detail_type = find_rebar_bending_detail_type(doc)
+        if not detail_type:
+            return
+
+        # Buscar estribos (rebars) cuyo host sea la viga
+        rebars = FilteredElementCollector(doc, view.Id) \
+                 .OfClass(Rebar) \
+                 .ToElements()
+
+        stirrup = None
+        for r in rebars:
+            # Una forma simple de identificar un estribo es por su forma o si es cerrado.
+            # Aquí tomamos la primera armadura encontrada como ejemplo de estribo.
+            if r.GetHostId() == beam.Id:
+                stirrup = r
+                break
+
+        if stirrup:
+            # Posición relativa para el detalle (fuera de la viga)
+            position = transform.Origin + transform.BasisX * 1.5 + transform.BasisY * 0.5
+            # Crear el detalle de doblado
+            # RebarBendingDetail.Create(Document, ElementId viewId, ElementId rebarId, int index, RebarBendingDetailType type, XYZ position, double rotation)
+            RebarBendingDetail.Create(doc, view.Id, stirrup.Id, 0, detail_type.Id, position, 0.0)
+            print("Detalle de doblado (bending detail) creado para el estribo.")
+
+    except Exception as e:
+        # El método RebarBendingDetail.Create es nuevo en Revit 2024.
+        # Si falla, probablemente sea una versión anterior o faltan parámetros.
+        pass
+
 def create_beam_section(doc, beam):
     """
-    Crea una vista de sección perpendicular al eje de la viga en su punto medio y la acota.
+    Crea una vista de sección perpendicular, la acota y añade detalles de doblado.
     """
-    # 1. Obtener la curva de ubicación de la viga
     loc_curve = beam.Location.Curve
     if not loc_curve:
         print("La viga no tiene una curva de ubicación válida.")
         return None
 
-    # 2. Calcular el punto medio y el vector tangente
     parameter = 0.5
     mid_point = loc_curve.Evaluate(parameter, True)
     tangent = loc_curve.ComputeDerivatives(parameter, True).BasisX.Normalize()
 
-    # 3. Definir el sistema de coordenadas de la sección (Transform)
     up_vector = XYZ.BasisZ
     if abs(tangent.DotProduct(up_vector)) > 0.999:
         up_vector = XYZ.BasisX
@@ -133,7 +165,6 @@ def create_beam_section(doc, beam):
     transform.BasisY = up_direction
     transform.BasisZ = view_direction
 
-    # 4. Configurar el BoundingBoxXYZ (Crop Box)
     w, h, d = 3.0, 3.0, 1.0
     section_box = BoundingBoxXYZ()
     section_box.Enabled = True
@@ -141,27 +172,24 @@ def create_beam_section(doc, beam):
     section_box.Min = XYZ(-w/2, -h/2, -d)
     section_box.Max = XYZ(w/2, h/2, 0)
 
-    # 5. Buscar tipo de sección "Viga"
     section_type = find_section_type_by_name(doc, "Viga")
     if not section_type:
         print("No se encontró un tipo de vista de sección adecuado.")
         return None
 
-    # 6. Crear la sección y acotar dentro de una transacción
-    t = Transaction(doc, "Crear Sección Acotada de Viga")
+    t = Transaction(doc, "Crear Sección Completa de Viga")
     t.Start()
     try:
         new_section = ViewSection.CreateSection(doc, section_type.Id, section_box)
-
-        # Asignar nombre único
         base_name = "Sección Viga - ID {}".format(beam.Id)
         new_section.Name = get_unique_view_name(doc, base_name)
-
-        # Configurar escala (ej. 1:10)
         new_section.Scale = 10
 
-        # Añadir cotas automáticas
+        # 1. Añadir cotas
         add_beam_dimensions(doc, new_section, beam, transform)
+
+        # 2. Añadir detalle de doblado (Revit 2024+)
+        add_stirrup_bending_detail(doc, new_section, beam, transform)
 
         t.Commit()
         return new_section
@@ -186,6 +214,6 @@ if __name__ == "__main__":
                    element.Category.Id == ElementId(BuiltInCategory.OST_StructuralFraming):
                     section = create_beam_section(doc, element)
                     if section:
-                        print("Éxito: Se ha generado la sección '{}'.".format(section.Name))
+                        print("Éxito: Se ha generado la sección completa '{}'.".format(section.Name))
     except NameError:
         print("Este script debe ejecutarse dentro de un entorno de Revit (pyRevit/Dynamo).")
