@@ -143,8 +143,8 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
             position = transform.Origin + (transform.BasisX * offset_x) + (transform.BasisY * offset_y)
 
             # Crear el detalle de doblado
-            # Parámetros: Document, ViewId, RebarId, barIndex (0), DetailTypeId, Position, Rotation
-            RebarBendingDetail.Create(doc, view.Id, stirrup.Id, 0, detail_type.Id, position, 0.0)
+            # Nota: El método Create requiere el OBJETO RebarBendingDetailType, no solo su ElementId.
+            RebarBendingDetail.Create(doc, view.Id, stirrup.Id, 0, detail_type, position, 0.0)
             print("Éxito: Detalle de doblado (bending detail) creado para la armadura ID {}.".format(stirrup.Id))
         else:
             print("Aviso: No se encontraron estribos (Rebar) hospedados en la viga ID {}.".format(beam.Id))
