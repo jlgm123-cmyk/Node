@@ -130,9 +130,22 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
         stirrup = None
         for r in all_rebars:
             if r.GetHostId() == beam.Id:
-                # Tomamos la primera armadura encontrada como estribo
-                stirrup = r
-                break
+                # Identificar el estribo por su forma (RebarShape)
+                # El usuario indica que su estribo tiene el shape "M_T1"
+                try:
+                    shape = doc.GetElement(r.GetShapeId())
+                    if shape and "M_T1" in shape.Name:
+                        stirrup = r
+                        break
+                except:
+                    continue
+
+        # Fallback: si no encuentra M_T1, toma la primera armadura del host
+        if not stirrup:
+            for r in all_rebars:
+                if r.GetHostId() == beam.Id:
+                    stirrup = r
+                    break
 
         if stirrup:
             # Posición relativa para el detalle (un poco alejado de la viga en el plano de la sección)
