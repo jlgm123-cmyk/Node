@@ -122,15 +122,14 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
             print("Aviso: No se encontró ningún 'RebarBendingDetailType' en el proyecto.")
             return
 
-        # Buscar estribos (rebars) hospedados en la viga
-        # Se utiliza RebarHostData para una búsqueda más fiable
-        host_data = RebarHostData.GetRebarHostData(beam)
-        rebars_in_host = host_data.GetRebarsInHost()
+        # Buscar armaduras que sean visibles en la sección recién creada
+        # Es fundamental que el estribo sea visible en la vista para crear el detalle
+        rebars_in_view = FilteredElementCollector(doc, view.Id).OfClass(Rebar).ToElements()
 
         stirrup = None
-        print("Buscando estribos (shape: M_T1) en la viga ID {} ({} armaduras encontradas)...".format(beam.Id, len(rebars_in_host)))
+        print("Buscando estribos (shape: M_T1) visibles en la sección ({} armaduras encontradas)...".format(len(rebars_in_view)))
 
-        for r in rebars_in_host:
+        for r in rebars_in_view:
             try:
                 # 1. Obtener la forma (RebarShape)
                 shape_id = r.GetShapeId()
@@ -175,15 +174,18 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
                 continue
 
         if stirrup:
-            # Posición relativa para el detalle (un poco alejado de la viga en el plano de la sección)
-            # transform.Origin es el centro de la viga.
-            # Desplazamos en BasisX (derecha de la vista) y BasisY (arriba de la vista).
-            offset_x = 2.0
-            offset_y = 1.0
-            position = transform.Origin + (transform.BasisX * offset_x) + (transform.BasisY * offset_y)
+            # Asegurar visibilidad de la armadura (Nivel de detalle Fino)
+            view.DetailLevel = ViewDetailLevel.Fine
+            doc.Regenerate()
+
+            # Posición para el detalle en coordenadas 2D de la vista
+            # Revit espera una posición en el plano de la vista.
+            # Usamos un pequeño desfase (offset) desde el centro proyectado.
+            position = XYZ(2.0, 1.0, 0.0)
 
             # Crear el detalle de doblado
-            # Nota: El método Create requiere el OBJETO RebarBendingDetailType, no solo su ElementId.
+            # El error viewId suele ocurrir si el punto no es válido en el plano de la vista
+            # o si los argumentos no coinciden con la sobrecarga esperada.
             RebarBendingDetail.Create(doc, view.Id, stirrup.Id, 0, detail_type, position, 0.0)
             print("Éxito: Detalle de doblado (bending detail) creado para la armadura ID {}.".format(stirrup.Id))
         else:
@@ -219,8 +221,9 @@ def create_beam_section(doc, beam):
     transform.BasisY = up_direction
     transform.BasisZ = view_direction
 
-    # Bounding Box (Ajustado para que el bending detail sea visible)
-    w, h, d = 6.0, 4.0, 1.0
+    # Bounding Box
+    # Aumentamos la profundidad (d) para asegurar que se capturen los estribos
+    w, h, d = 6.0, 4.0, 5.0
     section_box = BoundingBoxXYZ()
     section_box.Enabled = True
     section_box.Transform = transform
