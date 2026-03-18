@@ -98,45 +98,59 @@ def find_rebar_bending_detail_type(doc):
     """
     Busca el primer tipo de detalle de doblado de armadura disponible.
     """
-    collector = FilteredElementCollector(doc).OfClass(RebarBendingDetailType)
-    return collector.FirstElement()
+    try:
+        collector = FilteredElementCollector(doc).OfClass(RebarBendingDetailType)
+        return collector.FirstElement()
+    except:
+        return None
 
 def add_stirrup_bending_detail(doc, view, beam, transform):
     """
     Busca estribos asociados a la viga y crea un detalle de doblado en la vista.
     Revit 2024+
     """
+    # Verificar versión de Revit (RebarBendingDetail es 2024+)
+    revit_version = int(doc.Application.VersionNumber)
+    if revit_version < 2024:
+        print("Aviso: Los Bending Details de armadura requieren Revit 2024 o superior.")
+        return
+
     try:
         # Buscar el tipo de detalle de doblado
         detail_type = find_rebar_bending_detail_type(doc)
         if not detail_type:
+            print("Aviso: No se encontró ningún 'RebarBendingDetailType' en el proyecto.")
             return
 
-        # Buscar estribos (rebars) cuyo host sea la viga
-        rebars = FilteredElementCollector(doc, view.Id) \
-                 .OfClass(Rebar) \
-                 .ToElements()
+        # Buscar estribos (rebars) cuyo host sea la viga en todo el documento
+        all_rebars = FilteredElementCollector(doc) \
+                     .OfClass(Rebar) \
+                     .ToElements()
 
         stirrup = None
-        for r in rebars:
-            # Una forma simple de identificar un estribo es por su forma o si es cerrado.
-            # Aquí tomamos la primera armadura encontrada como ejemplo de estribo.
+        for r in all_rebars:
             if r.GetHostId() == beam.Id:
+                # Tomamos la primera armadura encontrada como estribo
                 stirrup = r
                 break
 
         if stirrup:
-            # Posición relativa para el detalle (fuera de la viga)
-            position = transform.Origin + transform.BasisX * 1.5 + transform.BasisY * 0.5
+            # Posición relativa para el detalle (un poco alejado de la viga en el plano de la sección)
+            # transform.Origin es el centro de la viga.
+            # Desplazamos en BasisX (derecha de la vista) y BasisY (arriba de la vista).
+            offset_x = 2.0
+            offset_y = 1.0
+            position = transform.Origin + (transform.BasisX * offset_x) + (transform.BasisY * offset_y)
+
             # Crear el detalle de doblado
-            # RebarBendingDetail.Create(Document, ElementId viewId, ElementId rebarId, int index, RebarBendingDetailType type, XYZ position, double rotation)
+            # Parámetros: Document, ViewId, RebarId, barIndex (0), DetailTypeId, Position, Rotation
             RebarBendingDetail.Create(doc, view.Id, stirrup.Id, 0, detail_type.Id, position, 0.0)
-            print("Detalle de doblado (bending detail) creado para el estribo.")
+            print("Éxito: Detalle de doblado (bending detail) creado para la armadura ID {}.".format(stirrup.Id))
+        else:
+            print("Aviso: No se encontraron estribos (Rebar) hospedados en la viga ID {}.".format(beam.Id))
 
     except Exception as e:
-        # El método RebarBendingDetail.Create es nuevo en Revit 2024.
-        # Si falla, probablemente sea una versión anterior o faltan parámetros.
-        pass
+        print("Error al crear el detalle de doblado: {}".format(e))
 
 def create_beam_section(doc, beam):
     """
@@ -165,7 +179,8 @@ def create_beam_section(doc, beam):
     transform.BasisY = up_direction
     transform.BasisZ = view_direction
 
-    w, h, d = 3.0, 3.0, 1.0
+    # Bounding Box (Ajustado para que el bending detail sea visible)
+    w, h, d = 6.0, 4.0, 1.0
     section_box = BoundingBoxXYZ()
     section_box.Enabled = True
     section_box.Transform = transform
@@ -177,7 +192,7 @@ def create_beam_section(doc, beam):
         print("No se encontró un tipo de vista de sección adecuado.")
         return None
 
-    t = Transaction(doc, "Crear Sección Completa de Viga")
+    t = Transaction(doc, "Crear Sección con Detalles de Viga")
     t.Start()
     try:
         new_section = ViewSection.CreateSection(doc, section_type.Id, section_box)
@@ -214,6 +229,6 @@ if __name__ == "__main__":
                    element.Category.Id == ElementId(BuiltInCategory.OST_StructuralFraming):
                     section = create_beam_section(doc, element)
                     if section:
-                        print("Éxito: Se ha generado la sección completa '{}'.".format(section.Name))
+                        print("Sección completa generada: '{}'.".format(section.Name))
     except NameError:
         print("Este script debe ejecutarse dentro de un entorno de Revit (pyRevit/Dynamo).")
