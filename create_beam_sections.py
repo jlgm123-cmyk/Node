@@ -184,20 +184,13 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
             position = XYZ(2.0, 1.0, 0.0)
 
             # Crear el detalle de doblado (Revit 2024+)
-            # 1. Validar si la vista es apta para bending details
-            is_view_valid = RebarBendingDetail.IsViewValidForBendingDetail(view)
-            # 2. Validar si la armadura es apta
-            is_rebar_valid = RebarBendingDetail.IsRebarValidForBendingDetail(view, stirrup.Id)
-
-            print("  - Validación: Vista={}, Armadura={}".format(is_view_valid, is_rebar_valid))
-
-            if is_view_valid and is_rebar_valid:
-                # El error indica que espera ElementId para el tipo de detalle.
-                # Parámetros: (Document, ViewId, RebarId, Index, DetailTypeId, Position, Rotation)
+            # Nota: El orden de parámetros para la versión basada en IDs es:
+            # (Document, ElementId viewId, ElementId rebarId, int barIndex, ElementId detailTypeId, XYZ position, double rotation)
+            try:
                 RebarBendingDetail.Create(doc, view.Id, stirrup.Id, 0, detail_type.Id, position, 0.0)
                 print("Éxito: Detalle de doblado creado para la armadura ID {}.".format(stirrup.Id))
-            else:
-                print("Aviso: La armadura o la vista no cumplen los requisitos para Bending Detail.")
+            except Exception as e_create:
+                print("Aviso: No se pudo crear el Bending Detail directamente ({}).".format(e_create))
         else:
             print("Aviso: No se encontraron estribos (Rebar) hospedados en la viga ID {}.".format(beam.Id))
 
