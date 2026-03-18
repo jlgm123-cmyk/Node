@@ -132,13 +132,15 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
 
         for r in rebars_in_host:
             try:
-                # 0. Filtrar por Estilo de Armadura (Stirrup/Tie)
-                if r.RebarStyle != RebarStyle.StirrupTie:
-                    continue
-
-                # 1. Verificar por Nombre de Forma (RebarShape)
+                # 1. Obtener la forma (RebarShape)
                 shape_id = r.GetShapeId()
                 shape = doc.GetElement(shape_id) if shape_id != ElementId.InvalidElementId else None
+
+                # 0. Filtrar por Estilo de Armadura (Stirrup/Tie)
+                # El estilo se suele encontrar en la forma (RebarShape)
+                if shape and shape.RebarStyle != RebarStyle.StirrupTie:
+                    continue
+
                 # Se usa SYMBOL_NAME_PARAM para evitar errores de acceso directo a Name
                 shape_name = shape.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString() if shape else "Desconocida"
 
