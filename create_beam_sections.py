@@ -101,7 +101,13 @@ if __name__ == "__main__":
             for el_id in selection_ids:
                 element = doc.GetElement(el_id)
                 # Verificar si el elemento es una viga (Structural Framing)
-                if element.Category.Id.IntegerValue == int(BuiltInCategory.OST_StructuralFraming):
+                # Se utiliza una comparación compatible con varias versiones de Revit (incluyendo 2024+)
+                is_beam = False
+                if element and element.Category:
+                    if element.Category.Id == ElementId(BuiltInCategory.OST_StructuralFraming):
+                        is_beam = True
+
+                if is_beam:
                     section = create_beam_section(doc, element)
                     if section:
                         print("Sección creada: {}".format(section.Name))
