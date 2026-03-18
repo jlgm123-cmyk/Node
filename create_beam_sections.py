@@ -128,24 +128,32 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
                      .ToElements()
 
         stirrup = None
-        for r in all_rebars:
-            if r.GetHostId() == beam.Id:
-                # Identificar el estribo por su forma (RebarShape)
-                # El usuario indica que su estribo tiene el shape "M_T1"
-                try:
-                    shape = doc.GetElement(r.GetShapeId())
-                    if shape and "M_T1" in shape.Name:
-                        stirrup = r
-                        break
-                except:
-                    continue
+        rebars_in_host = [r for r in all_rebars if r.GetHostId() == beam.Id]
 
-        # Fallback: si no encuentra M_T1, toma la primera armadura del host
-        if not stirrup:
-            for r in all_rebars:
-                if r.GetHostId() == beam.Id:
+        print("Buscando estribos (shape: M_T1) en la viga ID {}...".format(beam.Id))
+
+        for r in rebars_in_host:
+            try:
+                # 1. Verificar por Nombre de Forma (RebarShape)
+                shape = doc.GetElement(r.GetShapeId())
+                shape_name = shape.Name if shape else ""
+
+                # 2. Verificar por Nombre de Tipo (RebarBarType)
+                type_name = doc.GetElement(r.GetTypeId()).get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString()
+
+                print("- Rebar ID: {} | Shape: {} | Type: {}".format(r.Id, shape_name, type_name))
+
+                # El usuario especifica el shape "M_T1"
+                if "M_T1" in shape_name.upper():
                     stirrup = r
+                    print("  [!] Coincidencia de estribo encontrada por shape: {}".format(shape_name))
                     break
+                elif "M_T1" in type_name.upper():
+                    stirrup = r
+                    print("  [!] Coincidencia de estribo encontrada por tipo: {}".format(type_name))
+                    break
+            except:
+                continue
 
         if stirrup:
             # Posición relativa para el detalle (un poco alejado de la viga en el plano de la sección)
