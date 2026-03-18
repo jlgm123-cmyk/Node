@@ -8,9 +8,104 @@ clr.AddReference('RevitAPIUI')
 from Autodesk.Revit.DB import *
 from Autodesk.Revit.UI import *
 
+def find_section_type_by_name(doc, name="Viga"):
+    """
+    Busca un tipo de vista de sección por nombre.
+    Si no lo encuentra, devuelve el primero disponible.
+    """
+    collector = FilteredElementCollector(doc).OfClass(ViewFamilyType)
+    first_type = None
+    for vft in collector:
+        if vft.ViewFamily == ViewFamily.Section:
+            if not first_type:
+                first_type = vft
+            type_name = vft.get_Parameter(BuiltInParameter.SYMBOL_NAME_PARAM).AsString()
+            if name.lower() in type_name.lower():
+                return vft
+    return first_type
+
+def get_unique_view_name(doc, base_name):
+    """
+    Asegura que el nombre de la vista sea único en el documento.
+    """
+    collector = FilteredElementCollector(doc).OfClass(View)
+    existing_names = set([v.Name for v in collector])
+
+    if base_name not in existing_names:
+        return base_name
+
+    suffix = 1
+    new_name = "{} ({})".format(base_name, suffix)
+    while new_name in existing_names:
+        suffix += 1
+        new_name = "{} ({})".format(base_name, suffix)
+    return new_name
+
+def add_beam_dimensions(doc, view, beam, transform):
+    """
+    Intenta acotar el ancho y alto de la viga en la vista de sección.
+    Funciona mejor con vigas de sección rectangular estándar.
+    """
+    try:
+        opt = Options()
+        opt.ComputeReferences = True
+        opt.IncludeNonVisibleObjects = True
+        opt.View = view
+
+        geometry = beam.get_Geometry(opt)
+
+        # Recolectar planos/caras que sean paralelos a los ejes locales de la sección
+        horizontal_refs = ReferenceArray()
+        vertical_refs = ReferenceArray()
+
+        # En una sección transversal, buscamos planos cuyas normales sean
+        # paralelas a los ejes Right (BasisX) o Up (BasisY) de la sección.
+        view_right = transform.BasisX
+        view_up = transform.BasisY
+
+        for obj in geometry:
+            if isinstance(obj, Solid):
+                for face in obj.Faces:
+                    normal = face.ComputeNormal(UV(0.5, 0.5))
+                    # Normal paralela al eje horizontal de la vista (BasisX) -> Referencia para ancho
+                    if abs(normal.DotProduct(view_right)) > 0.99:
+                        vertical_refs.Append(face.Reference)
+                    # Normal paralela al eje vertical de la vista (BasisY) -> Referencia para alto
+                    elif abs(normal.DotProduct(view_up)) > 0.99:
+                        horizontal_refs.Append(face.Reference)
+            elif isinstance(obj, GeometryInstance):
+                inst_geom = obj.GetInstanceGeometry()
+                for inst_obj in inst_geom:
+                    if isinstance(inst_obj, Solid):
+                        for face in inst_obj.Faces:
+                            normal = face.ComputeNormal(UV(0.5, 0.5))
+                            if abs(normal.DotProduct(view_right)) > 0.99:
+                                vertical_refs.Append(face.Reference)
+                            elif abs(normal.DotProduct(view_up)) > 0.99:
+                                horizontal_refs.Append(face.Reference)
+
+        # Crear cota de ancho (Horizontal)
+        if vertical_refs.Size >= 2:
+            # Línea de cota horizontal (desplazada un poco arriba del centro)
+            line_p1 = transform.Origin + view_up * 0.5
+            line_p2 = line_p1 + view_right
+            dim_line = Line.CreateBound(line_p1, line_p2)
+            doc.Create.NewDimension(view, dim_line, vertical_refs)
+
+        # Crear cota de alto (Vertical)
+        if horizontal_refs.Size >= 2:
+            # Línea de cota vertical (desplazada un poco al lado del centro)
+            line_p1 = transform.Origin + view_right * 0.5
+            line_p2 = line_p1 + view_up
+            dim_line = Line.CreateBound(line_p1, line_p2)
+            doc.Create.NewDimension(view, dim_line, horizontal_refs)
+
+    except Exception as e:
+        print("Aviso: No se pudieron generar todas las cotas automáticas ({}).".format(e))
+
 def create_beam_section(doc, beam):
     """
-    Crea una vista de sección perpendicular al eje de la viga en su punto medio.
+    Crea una vista de sección perpendicular al eje de la viga en su punto medio y la acota.
     """
     # 1. Obtener la curva de ubicación de la viga
     loc_curve = beam.Location.Curve
@@ -19,19 +114,12 @@ def create_beam_section(doc, beam):
         return None
 
     # 2. Calcular el punto medio y el vector tangente
-    parameter = 0.5 # Punto medio (0.0 a 1.0)
+    parameter = 0.5
     mid_point = loc_curve.Evaluate(parameter, True)
     tangent = loc_curve.ComputeDerivatives(parameter, True).BasisX.Normalize()
 
     # 3. Definir el sistema de coordenadas de la sección (Transform)
-    # Para una sección perpendicular a la viga:
-    # - El eje Z de la vista (hacia donde mira) debe ser el eje de la viga (tangente).
-    # - El eje X de la vista (horizontal en el papel) suele ser el vector horizontal perpendicular.
-    # - El eje Y de la vista (vertical en el papel) es el eje Z global (hacia arriba).
-
     up_vector = XYZ.BasisZ
-
-    # Si la viga es vertical, necesitamos un vector 'up' diferente
     if abs(tangent.DotProduct(up_vector)) > 0.999:
         up_vector = XYZ.BasisX
 
@@ -45,54 +133,48 @@ def create_beam_section(doc, beam):
     transform.BasisY = up_direction
     transform.BasisZ = view_direction
 
-    # 4. Definir el BoundingBoxXYZ para la sección
-    # Estos valores definen el tamaño de la caja de corte (crop box)
-    w = 2.0 # Ancho total
-    h = 2.0 # Alto total
-    d = 1.0 # Profundidad (lejos del plano de sección)
-
+    # 4. Configurar el BoundingBoxXYZ (Crop Box)
+    w, h, d = 3.0, 3.0, 1.0
     section_box = BoundingBoxXYZ()
     section_box.Enabled = True
     section_box.Transform = transform
-
-    # El plano de la sección está en Z=0 en coordenadas locales de la caja.
-    # Min y Max definen el volumen visible en esas coordenadas locales.
     section_box.Min = XYZ(-w/2, -h/2, -d)
     section_box.Max = XYZ(w/2, h/2, 0)
 
-    # 5. Buscar el tipo de vista de sección (ViewFamilyType)
-    collector = FilteredElementCollector(doc)
-    view_family_types = collector.OfClass(ViewFamilyType).ToElements()
-    section_type_id = None
-    for vft in view_family_types:
-        if vft.ViewFamily == ViewFamily.Section:
-            section_type_id = vft.Id
-            break
-
-    if not section_type_id:
-        print("No se encontró un tipo de vista de sección.")
+    # 5. Buscar tipo de sección "Viga"
+    section_type = find_section_type_by_name(doc, "Viga")
+    if not section_type:
+        print("No se encontró un tipo de vista de sección adecuado.")
         return None
 
-    # 6. Crear la sección dentro de una transacción
-    t = Transaction(doc, "Crear Sección de Viga")
+    # 6. Crear la sección y acotar dentro de una transacción
+    t = Transaction(doc, "Crear Sección Acotada de Viga")
     t.Start()
     try:
-        new_section = ViewSection.CreateSection(doc, section_type_id, section_box)
+        new_section = ViewSection.CreateSection(doc, section_type.Id, section_box)
+
+        # Asignar nombre único
+        base_name = "Sección Viga - ID {}".format(beam.Id)
+        new_section.Name = get_unique_view_name(doc, base_name)
+
+        # Configurar escala (ej. 1:10)
+        new_section.Scale = 10
+
+        # Añadir cotas automáticas
+        add_beam_dimensions(doc, new_section, beam, transform)
+
         t.Commit()
         return new_section
     except Exception as e:
-        print("Error al crear la sección: {}".format(e))
+        print("Error al procesar la sección para el ID {}: {}".format(beam.Id, e))
         t.RollBack()
         return None
 
-# --- Lógica de ejecución (pyRevit) ---
+# --- Lógica de ejecución ---
 if __name__ == "__main__":
     try:
-        # Intentar obtener el documento activo desde el entorno de Revit
         uidoc = __revit__.ActiveUIDocument
         doc = uidoc.Document
-
-        # Obtener los elementos seleccionados
         selection_ids = uidoc.Selection.GetElementIds()
 
         if not selection_ids:
@@ -100,18 +182,10 @@ if __name__ == "__main__":
         else:
             for el_id in selection_ids:
                 element = doc.GetElement(el_id)
-                # Verificar si el elemento es una viga (Structural Framing)
-                # Se utiliza una comparación compatible con varias versiones de Revit (incluyendo 2024+)
-                is_beam = False
-                if element and element.Category:
-                    if element.Category.Id == ElementId(BuiltInCategory.OST_StructuralFraming):
-                        is_beam = True
-
-                if is_beam:
+                if element and element.Category and \
+                   element.Category.Id == ElementId(BuiltInCategory.OST_StructuralFraming):
                     section = create_beam_section(doc, element)
                     if section:
-                        print("Sección creada: {}".format(section.Name))
-                else:
-                    print("El elemento {} no es una viga.".format(el_id))
+                        print("Éxito: Se ha generado la sección '{}'.".format(section.Name))
     except NameError:
         print("Este script debe ejecutarse dentro de un entorno de Revit (pyRevit/Dynamo).")

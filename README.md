@@ -6,6 +6,14 @@ Este repositorio contiene un script de Python diseñado para su uso en Autodesk 
 
 - `create_beam_sections.py`: El script principal que contiene la lógica de la API de Revit.
 
+## Características
+
+- **Tipo de Vista**: Busca y utiliza automáticamente un tipo de sección llamado **"Viga"**. Si no existe, utiliza el tipo de sección por defecto del proyecto.
+- **Acotación Automática**: El script intenta identificar las caras laterales, superiores e inferiores de la viga para crear cotas de ancho y alto automáticamente en la nueva vista.
+- **Gestión de Nombres**: Asegura que cada sección tenga un nombre único (ej. "Sección Viga - ID 123456 (1)").
+- **Orientación Precisa**: Calcula el vector tangente en el punto medio de la viga para que la sección sea perfectamente perpendicular, incluso en vigas inclinadas o verticales.
+- **Compatibilidad**: Diseñado para funcionar en versiones recientes de Revit (incluyendo 2024+).
+
 ## Cómo usar el script
 
 El script está diseñado para ser ejecutado dentro de entornos que soporten la API de Revit con Python, como **pyRevit** o **Dynamo**.
@@ -14,22 +22,22 @@ El script está diseñado para ser ejecutado dentro de entornos que soporten la 
 
 - Autodesk Revit.
 - pyRevit instalado (recomendado) o Dynamo.
+- (Opcional) Un tipo de vista de sección llamado "Viga" creado en el proyecto para una mejor organización.
 
 ### Instrucciones para pyRevit
 
-1. Abre un proyecto de Revit que contenga vigas.
-2. Copia el contenido de `create_beam_sections.py` en un nuevo botón de pyRevit o ejecútalo a través de la consola de pyRevit.
-3. Asegúrate de tener una viga seleccionada en el modelo antes de ejecutar el script.
-4. El script creará una nueva sección en el punto medio de la viga seleccionada, orientada perpendicularmente a su eje.
+1. Abre un proyecto de Revit que contenga vigas (Structural Framing).
+2. Selecciona una o varias vigas en el modelo.
+3. Ejecuta el script.
+4. Las nuevas secciones aparecerán en el Navegador de Proyectos bajo el tipo correspondiente, con cotas de dimensiones aplicadas.
 
-### Lógica del Script
+## Lógica del Script
 
-1. **Selección**: Identifica la viga seleccionada por el usuario.
-2. **Geometría**: Obtiene la curva de ubicación (`LocationCurve`) de la viga.
-3. **Cálculo de Plano**: Calcula el vector tangente en el punto medio de la viga para definir la dirección de la vista.
-4. **Transformación**: Crea un objeto `Transform` y un `BoundingBoxXYZ` orientados para que el plano de la sección sea perpendicular a la viga.
-5. **Creación**: Utiliza `ViewSection.CreateSection` para generar la vista dentro de una transacción de Revit.
+1. **Filtro**: Solo procesa elementos de la categoría `OST_StructuralFraming`.
+2. **Transformación**: Crea un objeto `Transform` basado en el punto medio y la tangente de la viga.
+3. **Geometría**: Escanea el sólido de la viga en busca de caras cuyas normales coincidan con los ejes de la vista de sección.
+4. **Dimensionamiento**: Utiliza `doc.Create.NewDimension` para colocar las cotas de base y altura.
 
-## Personalización
+## Notas Técnicas
 
-Puedes ajustar las variables `w` (ancho), `h` (alto) y `d` (profundidad) en la función `create_beam_section` para cambiar el tamaño de la caja de sección generada.
+La acotación automática funciona de manera óptima con familias de vigas de sección rectangular estándar. En familias con geometrías muy complejas o irregulares, es posible que el script no encuentre referencias válidas para todas las cotas.
