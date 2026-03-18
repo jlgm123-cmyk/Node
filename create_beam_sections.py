@@ -174,23 +174,30 @@ def add_stirrup_bending_detail(doc, view, beam, transform):
                 continue
 
         if stirrup:
-            # Asegurar visibilidad de la armadura (Nivel de detalle Fino)
+            # Asegurar visibilidad y configuración de la vista
             view.DetailLevel = ViewDetailLevel.Fine
+            view.CropBoxActive = True
+            view.CropBoxVisible = True
             doc.Regenerate()
 
-            # Posición para el detalle en coordenadas 2D de la vista
-            # Revit espera una posición en el plano de la vista.
-            # Usamos un pequeño desfase (offset) desde el centro proyectado.
-            position = XYZ(2.0, 1.0, 0.0)
+            # Posición para el detalle (Coordenadas 2D de la vista)
+            # Se usa un punto cerca del origen de la vista (centro de la viga)
+            position = XYZ(1.0, 1.0, 0.0)
 
             # Crear el detalle de doblado (Revit 2024+)
-            # Nota: El orden de parámetros para la versión basada en IDs es:
-            # (Document, ElementId viewId, ElementId rebarId, int barIndex, ElementId detailTypeId, XYZ position, double rotation)
+            # Firma: (Document, viewId, rebarId, subelementKey, RebarBendingDetailType, position, rotation)
+            # subelementKey: -1 suele ser el valor para el elemento principal de Rebar.
             try:
-                RebarBendingDetail.Create(doc, view.Id, stirrup.Id, 0, detail_type.Id, position, 0.0)
+                # Intentar con el objeto RebarBendingDetailType (según la firma proporcionada)
+                RebarBendingDetail.Create(doc, view.Id, stirrup.Id, -1, detail_type, position, 0.0)
                 print("Éxito: Detalle de doblado creado para la armadura ID {}.".format(stirrup.Id))
-            except Exception as e_create:
-                print("Aviso: No se pudo crear el Bending Detail directamente ({}).".format(e_create))
+            except Exception as e_obj:
+                try:
+                    # Fallback: Intentar con ElementId del tipo si la firma del objeto falla
+                    RebarBendingDetail.Create(doc, view.Id, stirrup.Id, -1, detail_type.Id, position, 0.0)
+                    print("Éxito: Detalle de doblado creado (vía ID) para la armadura ID {}.".format(stirrup.Id))
+                except Exception as e_id:
+                    print("Aviso: No se pudo crear el Bending Detail ({}).".format(e_id))
         else:
             print("Aviso: No se encontraron estribos (Rebar) hospedados en la viga ID {}.".format(beam.Id))
 
